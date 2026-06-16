@@ -8,6 +8,8 @@
 
 **Execution mode:** You (the implementing AI) **write the code; the user reviews.** Implement **one step at a time** — a *step is a single stubbed function*, not a whole phase. After each step, run nothing further: pause, explain what you did and why, and hand the diff to the user for review before starting the next step. Do **not** batch steps unprompted (this is the "headless chicken" failure the user explicitly called out). Answering a question the user asked is **not** a go-ahead — the turn returns to the user.
 
+**Always maintain a step-progress task list (TaskCreate/TaskUpdate)** so the user can follow along: at the start of each phase, create one task per step of that phase; mark a task `in_progress` when you begin it and `completed` when the user has accepted it. This is the visible progress tracker — keep it current.
+
 **This is teaching mode.** The deliverable is the user's *understanding* of LangGraph multi-agent orchestration, not fast code. Before each step: say what the node does, why, and how it fits the graph. After: show the output and interpret it. Define new LangGraph terms the first time they appear (state, node, reducer, conditional edge, supervisor).
 
 **Context discipline — treat this as seriously as the code:**
@@ -44,7 +46,7 @@ The `ai-orchestrator/` repo is the **concrete realization** of those two abstrac
 | Decision | Choice | Why |
 |---|---|---|
 | Where code lives | **Fill blanks inside `ai-orchestrator/`** — do not create new modules | Homework is "fill in the blanks"; the scaffold, graphs, and routing already exist. |
-| Infra | **`ai-orchestrator/`'s OWN Docker stack** — `pgvector/pgvector:pg16`, host **port 5433**, db/user `demo`, password `demo123`, db name `rag_demo`. Run `docker compose up -d` from `ai-orchestrator/`. | **This is NOT the ai-engineer-lab stack.** See §2a. |
+| Infra | **`ai-orchestrator/`'s OWN Docker stack** — `pgvector/pgvector:pg16`, host **port 5434**, db/user `demo`, password `demo123`, db name `rag_demo`. Run `docker compose up -d` from `ai-orchestrator/`. | **This is NOT the ai-engineer-lab stack.** See §2a. |
 | LLM provider | **External provider via `skillab.get_llm()`**, selected by `.env` (`LLM_PROVIDER=openai\|gemini\|ollama`). **No litellm proxy.** | The agents default `llm = llm or get_llm()`; you don't construct LLMs — just call `self.llm.generate_sync(...)`. |
 | `skillab-py` is a real dependency | **Installed editable: `pip install -e skillab-py`.** Editing `skillab/tools/implementations.py` *is* part of the homework. | It's vendored into this repo, not a black box. |
 | State type | **Pydantic `BaseModel`** (already defined in `state.py`) — attribute access in nodes, return partial dicts. | Matches the scaffold; do not switch to TypedDict. |
@@ -56,14 +58,14 @@ The `ai-orchestrator/` repo is the **concrete realization** of those two abstrac
 | | `ai-orchestrator/` (this homework) | `ai-engineer-lab/` |
 |---|---|---|
 | Postgres image | `pgvector/pgvector:pg16` | `pgvector/pgvector:pg16` |
-| Host port | **5433** | 5432 |
+| Host port | **5434** | 5432 |
 | DB / user / pass | `rag_demo` / `demo` / `demo123` | `skillab` / `skillab` / `skillab_dev` |
 | LLM gateway | external provider (OpenAI/Gemini/Ollama) | local litellm + ollama (`skillab-litellm`, `skillab-ollama`) |
-| `DATABASE_URL` | `postgresql://demo:demo123@localhost:5433/rag_demo` | `postgresql://skillab:skillab_dev@localhost:5432/skillab` |
+| `DATABASE_URL` | `postgresql://demo:demo123@localhost:5434/rag_demo` | `postgresql://skillab:skillab_dev@localhost:5432/skillab` |
 
-**They share nothing** — no container, DB, credentials, port, or LLM gateway. The two stacks can run side by side (5432 vs 5433).
+**They share nothing** — no container, DB, credentials, port, or LLM gateway. The two stacks can run side by side (5432 vs 5434).
 
-**⚠️ Port-5433 conflict to check in Phase 0:** at last inspection a *different* container, `su-postgres` (plain `postgres:15.10`, **no pgvector**), was already bound to host port 5433. If it's still up, the orchestrator's pgvector Postgres **cannot bind 5433** and any `vector` operations would fail against the wrong server. Resolve before anything else: `docker stop su-postgres` (or remap), then bring up the orchestrator stack. Confirm the container answering on 5433 is the `pgvector/pgvector:pg16` one.
+**The orchestrator publishes on host port 5434** (`docker-compose.yaml` `"5434:5432"`, `.env` `DATABASE_URL=...localhost:5434/rag_demo`); the container's internal port is still 5432. After `docker compose up -d`, confirm the container answering on **5434** is the `pgvector/pgvector:pg16` one.
 
 ---
 
@@ -103,7 +105,7 @@ There are **no new files to create** for the core homework (smoke scripts in §4
 
 ```
 ai-orchestrator/
-├── docker-compose.yaml        # pgvector on 5433, db rag_demo (own stack)
+├── docker-compose.yaml        # pgvector on 5434, db rag_demo (own stack)
 ├── .env.example               # DATABASE_URL + LLM_PROVIDER (copy → .env)
 ├── alembic/versions/          # 001 document_chunks (pgvector), 002 achizitii_directe, 003 anunturi_initiere
 ├── data/
@@ -201,7 +203,7 @@ with transaction() as db:
 ## 8. Phased tasks (each phase ends in a smoke test; each node is its own step)
 
 ### Phase 0 — Infra & data (no code; verify the environment)
-1. **Resolve the 5433 conflict** (§2a): ensure the container on host port 5433 is the orchestrator's `pgvector/pgvector:pg16`, not `su-postgres`.
+1. **Port** (§2a): orchestrator publishes on host port **5434**. Ensure the container on host port 5434 is the orchestrator's `pgvector/pgvector:pg16`.
 2. `python -m venv` / use existing venv; `pip install -r requirements.txt`; **`pip install -e skillab-py`** (editable, so your tool edits take effect).
 3. `cp .env.example .env`; set `LLM_PROVIDER` + the matching API key (Gemini or OpenAI recommended over local Ollama for reliable SQL/JSON generation).
 4. `docker compose up -d` (from `ai-orchestrator/`); `alembic upgrade head`; restore data:
@@ -272,7 +274,7 @@ Repo-specific gotchas:
 7. **DataFrames live in state** — `NL2SQLState`/`AnalystState` set `arbitrary_types_allowed`; comparisons like `if df:` are ambiguous — use `.empty` / `len(df)`.
 8. **`analyst_plan` returns a `{"reasoning","steps"}` object**, and `steps` is a heterogeneous list — branch on `action` to build `QueryStep` vs `ToolStep` (a flat `model_validate` won't pick the union arm reliably).
 9. **`.invoke()` return-type access is inconsistent in this repo — verify before trusting either style.** The completed `node_call_rag` uses **attribute** access (`rag_result.result`, via `RAGAgent.run` → `graph.invoke`), while `main.py`'s `test_orchestrator()` uses **dict** access (`result['status']`, `result['answer']`). With a Pydantic `state_schema`, what `compiled_graph.invoke()` returns depends on the installed LangGraph version (some return the Pydantic model, some a dict). **Before writing smoke scripts, run one call and check** (`type(out)`, try both `out.status` and `out['status']`) — then match the style that works. Don't assume; this is the most likely thing to break a smoke script for a reason unrelated to your node logic.
-10. **Port 5433 / wrong-server trap** — see §2a; verify pgvector is the server actually answering on 5433 before debugging "vector type" errors.
+10. **Port 5434 / wrong-server trap** — see §2a; verify pgvector is the server actually answering on 5434 before debugging "vector type" errors.
 11. **Editable install** — if tool edits seem ignored, confirm `pip install -e skillab-py` ran in the active venv.
 12. **`db_url` constructor param is effectively dead** — `NL2SQLAgent`/`AnalystAgent` accept `db_url`, but `node_execute_sql` (per §7/§8) uses the global `transaction()`, which reads `database.DATABASE_URL` (from `.env`), **not** `self.db_url`. The constructor default and `.env` happen to point at the same DB, so it works — but don't wire `self.db_url` into your node expecting it to matter; the real source of truth is `DATABASE_URL`.
 13. **`threshold=0.0` is falsy** — the *completed* `node_search` does `state.current_threshold or self.config.default_threshold`, so a `RefinedQuery` returning `threshold=0.0` silently reverts to the default (0.25). When implementing `node_refine`, to broaden a search use a small positive value (e.g. `0.05`) or leave `threshold=None` (keep current) — never emit `0.0` expecting "no threshold."
@@ -287,7 +289,7 @@ Repo-specific gotchas:
 
 ## 10. Definition of done
 
-- The orchestrator's own pgvector stack is up on 5433 (`rag_demo`), `alembic upgrade head` applied, data restored; all three tables + `document_chunks` non-empty.
+- The orchestrator's own pgvector stack is up on 5434 (`rag_demo`), `alembic upgrade head` applied, data restored; all three tables + `document_chunks` non-empty.
 - `python src/main.py` runs both demos green (**uncomment `test_analyst()` in `__main__` first** — it ships commented out):
   - **`test_orchestrator()`** — answers a document question grounded in retrieved chunks (cites `file_name`), with the evaluate→refine→answer loop working (refine improves a weak first search rather than looping uselessly to max iterations).
   - **`test_analyst()`** — produces a plan, runs NL2SQL workers + at least one tool step (join/filter), and synthesizes a correct answer from the final slice.
