@@ -118,4 +118,4 @@ def test_analyst():
 
 if __name__ == "__main__":
     test_orchestrator()
-    # test_analyst()  # uncomment după ce ai schema JSON
+    test_analyst()

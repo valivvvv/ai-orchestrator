@@ -207,4 +207,4 @@ class NL2SQLAgent:
             table_name=self.table_name,
             max_retries=self.max_retries,
         )
-        return self.graph.invoke(initial)
+        return NL2SQLState(**self.graph.invoke(initial))

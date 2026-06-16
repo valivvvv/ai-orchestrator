@@ -113,13 +113,13 @@ Două sisteme:
 pip install -r requirements.txt
 pip install -e skillab-py
 
-docker-compose up -d
+docker-compose up -d   # Postgres pe portul host 5434
 alembic upgrade head
 
 # Restaurează date (694k achiziții, 8k anunțuri, 135 chunks)
-docker exec -i exercise_orchestrator-postgres-1 pg_restore -U demo -d rag_demo --data-only < data/rag_demo.dump
+docker exec -i ai-orchestrator-postgres-1 pg_restore -U demo -d rag_demo --data-only < data/rag_demo.dump
 
-cp .env.example .env  # editează API key
+cp .env.example .env  # editează API key; DATABASE_URL pe portul 5434
 ```
 
 ## Structură
@@ -131,7 +131,7 @@ cp .env.example .env  # editează API key
 ├── scripts/           # Seed scripts
 ├── skillab-py/        # LLM, prompts, tools
 │   └── src/skillab/tools/
-│       ├── implementations.py  # TODO: join_data, filter_data
+│       ├── implementations.py  # join_data, filter_data
 │       └── params.py           # Pydantic params
 └── src/
     ├── database.py        # Connection + transaction
@@ -139,14 +139,16 @@ cp .env.example .env  # editează API key
     ├── repositories.py    # Repository pattern
     ├── rag_service.py     # pgvector search service
     ├── state.py           # Pydantic states
-    ├── rag_agent.py       # TODO: node_refine
-    ├── orchestrator.py    # TODO: node_evaluate, node_answer
-    ├── nl2sql_agent.py    # TODO: node_generate_sql, node_validate_sql, node_execute_sql
-    ├── analyst_agent.py   # TODO: node_make_plan, node_synthesize
+    ├── rag_agent.py       # node_refine
+    ├── orchestrator.py    # node_evaluate, node_answer
+    ├── nl2sql_agent.py    # node_generate_sql, node_validate_sql, node_execute_sql
+    ├── analyst_agent.py   # node_make_plan, node_synthesize
     └── main.py
 ```
 
-## De implementat
+## Componente implementate
+
+Toate nodurile și tool-urile de mai jos sunt implementate și funcționale.
 
 ### 1. RAG Agent (`src/rag_agent.py`)
 ```python

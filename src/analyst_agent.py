@@ -3,6 +3,7 @@ Analyst Agent - TODO: Implementează nodurile
 """
 import json
 import logging
+import re
 from pathlib import Path
 
 import pandas as pd
@@ -35,7 +36,7 @@ class AnalystAgent:
     def __init__(
         self,
         tables_config: dict[str, dict],
-        db_url: str = "postgresql://demo:demo123@localhost:5433/rag_demo",
+        db_url: str = "postgresql://demo:demo123@localhost:5434/rag_demo",
         llm: LLMProvider | None = None,
     ):
         self.db_url = db_url
@@ -89,9 +90,37 @@ class AnalystAgent:
         """
         logger.info(f"[PLAN] {state.question}")
 
-        # TODO: implementează
+        prompt = self.prompts.render(
+            "analyst_plan",
+            tables=self.tables_info,
+            tools_catalog=self.tools_catalog,
+            question=state.question,
+        )
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
 
-        return {"reasoning": "TODO", "plan": [], "current_step": 0, "slices": {}, "step_results": []}
+        match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+        json_str = match.group(1) if match else response
+
+        try:
+            parsed = json.loads(json_str)
+        except json.JSONDecodeError:
+            logger.warning("[PLAN] failed to parse plan JSON")
+            return {"plan": [], "status": "no_plan"}
+
+        plan = []
+        for step in parsed.get("steps", []):
+            if step.get("action") == "query":
+                plan.append(QueryStep(**step))
+            elif step.get("action") == "tool":
+                plan.append(ToolStep(**step))
+
+        return {
+            "reasoning": parsed.get("reasoning", ""),
+            "plan": plan,
+            "current_step": 0,
+            "slices": {},
+            "step_results": [],
+        }
 
     def node_execute_step(self, state: AnalystState) -> dict:
         """Execută pasul curent din plan și stochează rezultatul în slices."""
@@ -228,9 +257,20 @@ class AnalystAgent:
         """
         logger.info("[SYNTHESIZE]")
 
-        # TODO: implementează
+        last_id = state.plan[-1].id if state.plan else None
+        final_data = str(state.slices[last_id].head(10)) if last_id in state.slices else ""
 
-        return {"answer": "TODO", "status": "failed"}
+        prompt = self.prompts.render(
+            "analyst_synthesize",
+            question=state.question,
+            reasoning=state.reasoning,
+            results=state.step_results,
+            final_data=final_data,
+        )
+        answer = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        status = "success" if any(r.status == "success" for r in state.step_results) else "failed"
+        return {"answer": answer, "status": status}
 
     # === ROUTING ===
 
