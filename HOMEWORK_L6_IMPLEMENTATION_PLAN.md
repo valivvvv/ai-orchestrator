@@ -10,6 +10,10 @@
 
 **Always maintain a step-progress task list (TaskCreate/TaskUpdate)** so the user can follow along: at the start of each phase, create one task per step of that phase; mark a task `in_progress` when you begin it and `completed` when the user has accepted it. This is the visible progress tracker — keep it current.
 
+**After every completed phase, update this plan to mark that phase `✅ DONE`** (on its `### Phase N` heading in §8). Do this as the final action of the phase so the plan always reflects which phases are finished.
+
+**Every smoke test must be reported as an end-to-end trace, not just a pass/fail.** After running a smoke test, present to the user: (1) an **execution-flow map** — the command, then the chain of files/methods the data passes through in execution order (e.g. `script → agent.run → graph → node_X → prompt/LLM → DB → back to script`), as a compact diagram, **without pasting code bodies** (the code is in the codebase — reference files/methods by name only); (2) the **actual input data** that flowed through (the rendered prompt sent to the LLM, the generated SQL, query params) and the **actual output data** (returned rows/DataFrame, final state fields like `status`/`retry_count`); (3) a table mapping each console line to the file/method that emitted it. Keep it visual and concise — the goal is to *see* the pipeline working with real data, not to re-read source.
+
 **This is teaching mode.** The deliverable is the user's *understanding* of LangGraph multi-agent orchestration, not fast code. Before each step: say what the node does, why, and how it fits the graph. After: show the output and interpret it. Define new LangGraph terms the first time they appear (state, node, reducer, conditional edge, supervisor).
 
 **Context discipline — treat this as seriously as the code:**
@@ -202,7 +206,7 @@ with transaction() as db:
 
 ## 8. Phased tasks (each phase ends in a smoke test; each node is its own step)
 
-### Phase 0 — Infra & data (no code; verify the environment)
+### Phase 0 — Infra & data (no code; verify the environment) — ✅ DONE
 1. **Port** (§2a): orchestrator publishes on host port **5434**. Ensure the container on host port 5434 is the orchestrator's `pgvector/pgvector:pg16`.
 2. `python -m venv` / use existing venv; `pip install -r requirements.txt`; **`pip install -e skillab-py`** (editable, so your tool edits take effect).
 3. `cp .env.example .env`; set `LLM_PROVIDER` + the matching API key (Gemini or OpenAI recommended over local Ollama for reliable SQL/JSON generation).
@@ -211,7 +215,7 @@ with transaction() as db:
    (if the dump restore is flaky, `python scripts/seed_chunks.py` + `python scripts/seed_tables.py` are the fallback path).
 - **Smoke:** a SQLAlchemy connection to `DATABASE_URL` succeeds; `SELECT count(*)` on `document_chunks`, `achizitii_directe`, `anunturi_initiere` returns non-zero (README expects ~135 chunks, ~694k contracts, ~8k notices); `SELECT '...'::vector` works (pgvector live).
 
-### Phase 1 — NL2SQL Agent (L5 core: state → nodes → conditional edges → retry/fallback)
+### Phase 1 — NL2SQL Agent (L5 core: state → nodes → conditional edges → retry/fallback) — ✅ DONE
 
 > **⚠️ Read this before writing — the retry loop's correction logic lives in `generate_sql`, NOT `handle_error`.** The graph wiring is locked: `handle_error → generate_sql → validate_sql → execute_sql`. That means **`generate_sql` is the node that actually produces the SQL that gets validated and executed on every pass, including retries.** If you (as the stub docstring loosely suggests) put the "render `nl2sql_error` and return corrected SQL" logic in `handle_error`, that corrected SQL is immediately **discarded** by the very next node — `generate_sql` regenerates from scratch — and the agent re-emits the same failing query until `max_retries`. So: **`generate_sql` is error-aware** (it renders `nl2sql_error` whenever a prior error is present), and **`handle_error` is just the retry counter / terminal-failure decision.**
 >

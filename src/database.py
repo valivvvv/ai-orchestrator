@@ -13,7 +13,7 @@ load_dotenv()
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql://demo:demo123@localhost:5433/rag_demo"
+    "postgresql://demo:demo123@localhost:5434/rag_demo"
 )
 
 engine = create_engine(DATABASE_URL, echo=False, pool_pre_ping=True)

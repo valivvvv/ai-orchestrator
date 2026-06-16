@@ -14,10 +14,13 @@ sentence-transformers
 
 # LLM (unul din acestea)
 openai
-google-generativeai
+google-genai
 
 # Utils
 python-dotenv
 tqdm
 pydantic>=2.0
 langgraph
+
+# SQL parsing (NL2SQL validation)
+sqlparse>=0.5
