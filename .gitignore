@@ -1,0 +1,18 @@
+# Environment
+.env
+__pycache__/
+*.pyc
+
+# IDE
+.vscode/
+.idea/
+
+# Data (prea mare pentru git)
+*.dump
+data/documents-sql/achizitiidirecte2018t2.xlsx
+
+# macOS
+.DS_Store
+
+# Alembic
+*.db
