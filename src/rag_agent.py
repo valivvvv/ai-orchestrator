@@ -57,28 +57,45 @@ class RAGAgent:
     # === NODES ===
 
     def node_refine(self, state: RAGAgentState) -> dict:
-        """
-        TODO: Rafinează query-ul dacă avem feedback.
+        """Reformulate the search query before searching.
 
-        Dacă state.feedback este None (prima căutare):
-            - Returnează refined = RefinedQuery(query=state.query)
-
-        Dacă state.feedback există (orchestratorul a zis că nu poate răspunde):
-            1. Construiește found_summary din state.result.results (dacă există)
-            2. Renderează prompt "rag_refine" cu:
-               - original_query, current_query, found_summary
-               - max_score, avg_score, current_threshold
-               - feedback (can_answer, missing_info, suggestion)
-            3. Apelează LLM
-            4. Parsează JSON în RefinedQuery cu model_validate_json()
-            5. Return {"refined": RefinedQuery(...)}
+        On the first search there is no feedback, so the original query is used
+        unchanged. When the orchestrator has sent feedback (it could not answer
+        with the previous results), ask the LLM for a reformulated query and an
+        adjusted threshold based on that feedback.
         """
         logger.info(f"[REFINE] feedback={state.feedback is not None}")
 
-        # TODO: implementează
+        # First search: no feedback yet, use the query as-is.
+        if state.feedback is None:
+            return {"refined": RefinedQuery(query=state.query)}
 
-        # Placeholder: returnează query-ul original fără rafinare
-        return {"refined": RefinedQuery(query=state.query)}
+        found_summary = ""
+        max_score = state.result.max_score if state.result else 0.0
+        avg_score = state.result.avg_score if state.result else 0.0
+
+        prompt = self.prompts.render(
+            "rag_refine",
+            original_query=state.query,
+            current_query=state.current_query,
+            found_summary=found_summary,
+            max_score=max_score,
+            avg_score=avg_score,
+            current_threshold=state.current_threshold,
+            can_answer=state.feedback.can_answer,
+            missing_info=state.feedback.missing_info,
+            suggestion=state.feedback.suggestion,
+        )
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+        json_str = match.group(1) if match else response
+        data = json.loads(json_str)
+        refined = RefinedQuery.model_validate(
+            {key: value for key, value in data.items() if value is not None}
+        )
+
+        return {"refined": refined}
 
     def node_search(self, state: RAGAgentState) -> dict:
         """Caută chunks similare în pgvector. COMPLET - nu modifica."""

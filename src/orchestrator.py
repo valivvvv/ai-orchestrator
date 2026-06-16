@@ -10,7 +10,9 @@ Flow:
 
 TODO pentru studenți: node_evaluate, node_answer
 """
+import json
 import logging
+import re
 from pathlib import Path
 from typing import Literal
 
@@ -70,7 +72,7 @@ class Orchestrator:
         )
 
         return {
-            "rag_result": rag_result.result,
+            "rag_result": rag_result["result"],
             "iteration": state.iteration + 1,
         }
 
@@ -98,9 +100,30 @@ class Orchestrator:
         """
         logger.info(f"[EVALUATE] iter {state.iteration}")
 
-        # TODO: implementează
+        results = state.rag_result.results if state.rag_result else []
 
-        return {"feedback": OrchestratorFeedback(can_answer=False, missing_info="TODO")}
+        # Nothing was retrieved - no point asking the LLM, just keep searching.
+        if not results:
+            return {"feedback": OrchestratorFeedback(can_answer=False, missing_info="Niciun rezultat găsit.")}
+
+        context = "\n\n".join(f"[{item.file_name}]\n{item.content}" for item in results)
+        prompt = self.prompts.render(
+            "rag_evaluate",
+            query=state.query,
+            context=context,
+            max_score=state.rag_result.max_score,
+            avg_score=state.rag_result.avg_score,
+        )
+        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
+        json_str = match.group(1) if match else response
+        data = json.loads(json_str)
+        feedback = OrchestratorFeedback.model_validate(
+            {key: value for key, value in data.items() if value is not None}
+        )
+
+        return {"feedback": feedback}
 
     def node_answer(self, state: OrchestratorState) -> dict:
         """
@@ -125,9 +148,25 @@ class Orchestrator:
         """
         logger.info("[ANSWER]")
 
-        # TODO: implementează
+        results = state.rag_result.results if state.rag_result else []
 
-        return {"answer": "TODO", "status": "failed"}
+        # No context found at all - don't bother calling the LLM.
+        if not results:
+            return {
+                "answer": "Nu am găsit informații relevante pentru a răspunde la întrebare.",
+                "status": "failed",
+            }
+
+        context = "\n\n".join(f"[{item.file_name}]\n{item.content}" for item in results)
+        prompt = self.prompts.render("rag_answer", query=state.query, context=context)
+        answer = self.llm.generate_sync([{"role": "user", "content": prompt}])
+
+        # success only if the supervisor was satisfied; otherwise we answered
+        # on a best-effort basis (e.g. max iterations reached).
+        can_answer = bool(state.feedback and state.feedback.can_answer)
+        status = "success" if can_answer else "partial"
+
+        return {"answer": answer, "status": status}
 
     # === ROUTING ===
 

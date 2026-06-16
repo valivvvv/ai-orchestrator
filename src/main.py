@@ -72,8 +72,8 @@ def test_orchestrator():
     app = orch.build_graph()
 
     queries = [
-        "Care e totalul facturilor TechSoft?",
         "Ce contact are DataPro?",
+        "Care e totalul facturilor TechSoft?",
     ]
 
     for query in queries:
