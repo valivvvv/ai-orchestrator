@@ -246,7 +246,7 @@ Implement in dependency order so each step is observable:
    This is what makes iteration 2+ productive (a reformulated query / adjusted threshold driven by the orchestrator's feedback).
 - **Smoke:** `python src/main.py` → `test_orchestrator()` answers a document question and cites a `file_name`; logs show `[CALL_RAG] iter 1`, an `[EVALUATE]`, and either a direct `[ANSWER]` or a refine→re-search loop before answering.
 
-### Phase 3 — Tools (L6 worker tools; leaf dependency for the Analyst)
+### Phase 3 — Tools (L6 worker tools; leaf dependency for the Analyst) — ✅ DONE
 Fill `skillab-py/src/skillab/tools/implementations.py` (editable install already active). The functions take a **single Pydantic params object** — `ToolWrapper.call(name, args)` does `params_model(**args)`, so `args["input_dfs"]` + the rest are validated into `JoinDataParams`/`FilterDataParams` before your function runs.
 1. **`join_data`** → `pd.merge(params.input_dfs[0], params.input_dfs[1], left_on=params.left_key, right_on=params.right_key, how=params.how)`. (`how` is a `Literal["inner","left","right","outer"]`, default `"inner"`; Pydantic rejects anything else before you see it.)
 2. **`filter_data`** → boolean-index `params.input_dfs[0]` on `params.column`. **⚠️ `params.value` is typed `str` in `FilterDataParams` — Pydantic coerces it to a string, and `analyst_plan` even instructs the LLM to emit `"value": "100"` as a string.** So:
