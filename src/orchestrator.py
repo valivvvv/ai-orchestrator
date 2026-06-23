@@ -62,6 +62,20 @@ class Orchestrator:
 
         self._app = None  # compiled graph, built once on first run()
 
+    def _build_messages(self, user_prompt: str) -> list[dict]:
+        """Wrap a user prompt, prepending the static system prompt only when the
+        provider caches it (getattr guard).
+
+        The system prompt is the large cache target (orchestrator_system.yaml).
+        Gating on cache_system keeps the Gemini test_orchestrator() path - which
+        runs these same nodes - on the original user-only message.
+        """
+        messages = [{"role": "user", "content": user_prompt}]
+        if getattr(self.llm, "cache_system", False):
+            system_text = self.prompts.render("orchestrator_system")
+            messages.insert(0, {"role": "system", "content": system_text})
+        return messages
+
     # === NODES ===
 
     def node_load_memory(self, state: OrchestratorState) -> dict:
@@ -148,7 +162,7 @@ class Orchestrator:
             max_score=state.rag_result.max_score,
             avg_score=state.rag_result.avg_score,
         )
-        response = self.llm.generate_sync([{"role": "user", "content": prompt}])
+        response = self.llm.generate_sync(self._build_messages(prompt))
 
         match = re.search(r"```json\s*(.*?)\s*```", response, re.DOTALL)
         json_str = match.group(1) if match else response
@@ -193,7 +207,7 @@ class Orchestrator:
 
         context = "\n\n".join(f"[{item.file_name}]\n{item.content}" for item in results)
         prompt = self.prompts.render("rag_answer", query=state.query, context=context, history=state.history)
-        answer = self.llm.generate_sync([{"role": "user", "content": prompt}])
+        answer = self.llm.generate_sync(self._build_messages(prompt))
 
         # success only if the supervisor was satisfied; otherwise we answered
         # on a best-effort basis (e.g. max iterations reached).
