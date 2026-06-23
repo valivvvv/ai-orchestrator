@@ -196,11 +196,15 @@ with transaction() as session:
 
 ## 8. Phased tasks (each phase ends in a smoke test; each function/model/script is its own step)
 
+> **Overview.** *Problem:* the app runs on Gemini and has no Anthropic/ML deps. *What:* install `anthropic` + `scikit-learn` + `joblib`, add the Anthropic key/model to `.env`, confirm Postgres is up. *Why:* Tasks 2 and 3 can't run otherwise. *Proven by:* a one-shot Claude round-trip + a DB connection.
+
 ### Phase 0 — Setup & infra (no agent code; prepare the environment)
 1. `requirements.txt`: add `anthropic`, `scikit-learn`, `joblib`. `pip install -r requirements.txt` (+ confirm `pip install -e skillab-py` still active).
 2. `.env`: add `ANTHROPIC_API_KEY=<key>` and `ANTHROPIC_MODEL=claude-haiku-4-5`. (Keep the existing Gemini config for the L5/L6 agents.)
 3. Confirm the 5434 pgvector stack is up (`docker compose up -d`); `DATABASE_URL` reachable.
 - **Smoke:** `get_llm(provider="anthropic")` returns a configured provider (`is_configured()` True); one `generate_sync` round-trips on `claude-haiku-4-5`; SQLAlchemy connects to `DATABASE_URL`. **Verified facts (via `claude-api` skill, 2026-06-23):** model id `claude-haiku-4-5`; min cacheable prefix **4096 tokens**; pricing **$1.00 / 1M input, $5.00 / 1M output**; cache reads bill ~0.1×, writes ~1.25× (5-min ephemeral TTL). **Cost-driven choice: Haiku 4.5 over Sonnet 4.6 — caching demo is Anthropic-specific so "free" isn't viable; Haiku is the cheapest capable Claude.**
+
+> **Overview.** *Problem:* the Orchestrator answers each query in isolation — ask "Ce contact are DataPro?" then "Și ce adresă?" and the second query has no idea who "they" are, so retrieval finds nothing. *What:* persist every turn to Postgres (`sessions` + `chat_messages`) and add two LangGraph nodes — `load_memory` (rewrites a follow-up into a standalone query using prior turns) and `save_memory` (records the turn). *Why:* gives the agent a conversation — follow-ups resolve against earlier context, and history survives a restart. *Proven by:* a 2-turn conversation where turn 2 ("Și ce adresă?") correctly answers about DataPro, with 4 rows in `chat_messages`.
 
 ### Phase 1 — Conversation Memory (Task 1: L8) — ✅ DONE
 
@@ -220,6 +224,8 @@ with transaction() as session:
 12. **`Orchestrator.run(query, session_id)`** — build the graph (cache the compiled graph; build once), `invoke(OrchestratorState(query=query, session_id=session_id))`, return the result dict. The single conversational entry seam.
 - **Smoke (`scripts/smoke_memory.py`):** turn 1 `run("Ce contact are DataPro?", session_id="s1")`; turn 2 `run("Și ce adresă are?", session_id="s1")` — `node_load_memory` rewrites turn 2 to a standalone query (e.g. "Ce adresă are DataPro?"), retrieval succeeds, the `rag_answer` prompt **contains turn-1 history**, and the answer is about DataPro's address. `chat_messages` has 4 rows for `s1` with the **original** user texts. Re-run the script (simulating restart) → history loads from Postgres, row count grows. Report: the rewritten query, the persisted rows, and the history-injected prompt.
 
+> **Overview.** *Problem:* the Orchestrator re-sends a large static system prompt on every LLM call and pays full input price each time. *What:* mark that system prompt with Anthropic's `cache_control: ephemeral` so the first call writes it to cache and later calls (within ~5 min) read it back at ~0.1× price. *Why:* the static prefix is identical every call — caching it cuts input cost and latency on repeat calls. *Proven by:* one run whose `usage_log` shows `cache_creation` on the first system-block call then `cache_read` on a later one, with tokens-saved + latency-delta numbers.
+
 ### Phase 2 — Prompt Caching (Task 2: L8) — ✅ DONE
 1. **`prompts/orchestrator_system.yaml`** — author a large **static** "Document Analyst" system prompt (role, corpus domain description, answering rules, format guidance) that **exceeds the model's min cacheable tokens** (target ≥ **4096** for Haiku 4.5 — confirmed via `claude-api`; a 2048-token prompt would silently NOT cache on Haiku). Mostly static; no per-query Jinja vars.
 2. **`AnthropicProvider`** — add `cache_system: bool = False` (constructor + settable attribute) and a `self._usage_log` list with a `usage_log` property + a `reset_usage()` method (`last_usage` = `usage_log[-1]` optional convenience).
@@ -234,7 +240,9 @@ with transaction() as session:
 - **Latency measurement** uses a thin `generate_sync` wrapper in the smoke script (timing is not in `usage_log`); indices stay aligned because every call appends exactly one usage record.
 - **Observed run** (`status: success`, 1 evaluate iteration → 2 LLM calls; RAG search is embedding-only, no LLM refine since `feedback=False`): call #0 `node_evaluate` cache_creation=4508; call #1 `node_answer` cache_read=4508. Saved **$0.004057** per cached read (Haiku $1/1M input, read ~0.1×); latency **4.65s → 1.67s (−2.98s)** on the cache hit.
 
-### Phase 3 — Intent Classifier (Task 3: L7) — one step per item
+> **Overview.** *Problem:* classifying a query's intent (`search` / `extract` / `summarize`) with an LLM is slow and costs money per call — overkill for a 3-way label. *What:* train a small TF-IDF + LogisticRegression model on labeled queries, then compare it head-to-head against an LLM classifier on a held-out set. *Why:* demonstrates the classical-ML-vs-LLM tradeoff — a tiny model is ~free, ~100× faster, and (on a narrow task) nearly as accurate. *Proven by:* `compare_intent.py` printing a latency / cost / accuracy table for both. *Note:* standalone — the classifier is **not** wired into the live agent graph (§9 pitfall 15).
+
+### Phase 3 — Intent Classifier (Task 3: L7) — ✅ DONE
 1. **`data/intent/training_data.json`** — `[{text, label}]` over `search`/`extract`/`summarize` (aim ~30–60 examples/label; Romanian + English queries matching the document/data domain).
 2. **`data/intent/test_data.json`** — a held-out labeled set (not in training).
 3. **`scripts/train_intent.py`** — build the TF-IDF + LogisticRegression `Pipeline`, `.fit`, `joblib.dump` to `data/intent/intent_classifier.joblib`; print train accuracy.
@@ -242,6 +250,14 @@ with transaction() as session:
 5. **LLM baseline** (inside `compare_intent.py` or a small helper) — a Claude classification prompt returning one of the three labels; parse it.
 6. **`scripts/compare_intent.py`** (DELIVERABLE) — over `test_data.json`, run both; print a table of **latency** (avg ms/call), **cost** (LLM tokens×price vs ~$0), **accuracy** (vs ground truth). Use `time.perf_counter()`; verify LLM pricing via `claude-api`.
 - **Smoke:** `python scripts/compare_intent.py` prints the comparison table; the classifier is ~100× faster, ~free, within a few points of the LLM's accuracy.
+
+**Phase 3 results & deviations (2026-06-23):**
+- **Data:** `training_data.json` = 120 examples (40/40/40, RO+EN, real corpus entities); `test_data.json` = 24 held-out (8/8/8), verified zero text overlap with training. Train accuracy 1.000 (expected for clean, separable labels).
+- **LLM baseline placement:** kept as a small standalone helper `src/intent_llm.py` (not inlined in `compare_intent.py`) so it was reviewable as its own step; inline Romanian prompt constant matches the `seed_chunks.py` script convention.
+- **`detect_intent` returns plain `str`** — cast the numpy `np.str_` label to `str` so `==` comparisons and prints are clean (confidence already `float`).
+- **Latency fairness:** `compare_intent.py` does one warm-up `detect_intent` call so the one-time joblib load is not charged to per-call latency.
+- **Observed run** (held-out n=24): scikit-learn **87.5%** acc, **0.37 ms/call**, **$0** ; LLM **100%**, **9592 ms/call**, **$0.004580** (4060 input + 104 output tokens / 24 calls). Classifier ~25,600× faster. The 3 classifier misses are all `extract`↔`summarize` at low confidence (0.34–0.40) — the inherently fuzzy boundary. **Kept 87.5% as-is** (user decision): a real tradeoff is more instructive than a suspicious 100%; a confidence threshold could route low-confidence queries to the LLM.
+- **README section written in Romanian** to match the existing README (the English-comments rule applies to code, not doc prose) — "Temă L8 — cum se testează" with setup + the 4-command table + Gemini quota note.
 7. **`README.md` — "L8 homework — how to test" section (do LAST, after all three smokes pass).** The lecturer's only current map is these plan files; the README is still the L6 version. Add a section with: (a) the setup sequence — `docker compose up -d` → `alembic upgrade head` → seed (`seed_tables.py`, `seed_chunks.py`, `generate_docs.py`) → `.env` keys (`ANTHROPIC_API_KEY`, `GEMINI_API_KEY`, `ANTHROPIC_MODEL=claude-haiku-4-5`, `DATABASE_URL` on 5434) → `pip install -r requirements.txt` + `pip install -e skillab-py`; (b) the four run commands with one line each on what they demonstrate — `python src/main.py` (base RAG + Analyst), `python scripts/smoke_memory.py` (Task 1: multi-turn + restart persistence), `python scripts/smoke_prompt_cache.py` (Task 2: cache_creation→cache_read + $/latency), `python scripts/compare_intent.py` (Task 3: classifier-vs-LLM table). Fold all three tasks in together so the lecturer has one copy-paste path. Note the Gemini free-tier ~20 req/day/model cap (§9 pitfall 13).
 
 ---

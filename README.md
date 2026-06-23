@@ -122,6 +122,46 @@ docker exec -i ai-orchestrator-postgres-1 pg_restore -U demo -d rag_demo --data-
 cp .env.example .env  # editează API key; DATABASE_URL pe portul 5434
 ```
 
+## Temă L8 — cum se testează
+
+Cele trei task-uri ale temei (Memory, Prompt Caching, Intent Classifier) se rulează din rădăcina repo-ului, după setup.
+
+### Setup (o singură dată)
+
+```bash
+# 1. Infra
+docker compose up -d            # Postgres pgvector pe portul host 5434
+alembic upgrade head            # include migrația 004 (sessions + chat_messages)
+
+# 2. Date
+docker exec -i ai-orchestrator-postgres-1 pg_restore -U demo -d rag_demo --data-only < data/rag_demo.dump
+# (alternativ: python scripts/seed_tables.py && python scripts/seed_chunks.py)
+
+# 3. Dependențe
+pip install -r requirements.txt
+pip install -e skillab-py
+
+# 4. .env (chei necesare)
+#   GEMINI_API_KEY=...                  # agenții L5/L6 (RAG, Analyst)
+#   ANTHROPIC_API_KEY=...               # memory + caching + intent (Claude)
+#   ANTHROPIC_MODEL=claude-haiku-4-5
+#   DATABASE_URL=postgresql://demo:demo123@localhost:5434/rag_demo
+
+# 5. Antrenează clasificatorul de intenții (produce data/intent/intent_classifier.joblib)
+python scripts/train_intent.py
+```
+
+### Comenzi (din rădăcina repo-ului)
+
+| Comandă | Ce demonstrează |
+|---|---|
+| `python src/main.py` | RAG + Analyst de bază (L5/L6, pe Gemini) |
+| `python scripts/smoke_memory.py` | **Task 1** — conversație multi-turn + persistență după restart (Postgres) |
+| `python scripts/smoke_prompt_cache.py` | **Task 2** — `cache_creation` → `cache_read`, tokens economisiți + latență |
+| `python scripts/compare_intent.py` | **Task 3** — tabel clasificator-vs-LLM (latență / cost / acuratețe) |
+
+> **Notă quota Gemini:** free tier ≈ 20 cereri/zi/model. `python src/main.py` plus bucla evaluate/refine a orchestratorului o consumă rapid; cele trei demo-uri L8 rulează pe Claude (Anthropic), deci quota Gemini contează doar pentru `main.py`.
+
 ## Structură
 
 ```

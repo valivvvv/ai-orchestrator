@@ -1,0 +1,28 @@
+[
+  {"text": "Găsește contractul nr 003 cu CloudNet", "label": "search"},
+  {"text": "Caută toate facturile scadente în martie", "label": "search"},
+  {"text": "Arată-mi clienții care au cod CAEN de software", "label": "search"},
+  {"text": "Unde este raportul pe trimestrul patru?", "label": "search"},
+  {"text": "Find every invoice addressed to WebDev Plus", "label": "search"},
+  {"text": "Locate the client record for SecureIT", "label": "search"},
+  {"text": "List the contracts worth more than 10000 lei", "label": "search"},
+  {"text": "Search for documents mentioning penalty clauses", "label": "search"},
+
+  {"text": "Care este numărul de cont bancar al TechSoft?", "label": "extract"},
+  {"text": "Ce sumă totală apare pe factura 0009?", "label": "extract"},
+  {"text": "Extrage data semnării contractului 002", "label": "extract"},
+  {"text": "Care este codul poștal din adresa CloudNet?", "label": "extract"},
+  {"text": "What is the registration date of WebDev Plus?", "label": "extract"},
+  {"text": "Give me the VAT amount on invoice 0006", "label": "extract"},
+  {"text": "Who signed contract 003 on behalf of CloudNet?", "label": "extract"},
+  {"text": "What is the phone number listed for SecureIT?", "label": "extract"},
+
+  {"text": "Rezumă pe scurt raportul din Q4 2023", "label": "summarize"},
+  {"text": "Fă-mi un sumar al contractului 003", "label": "summarize"},
+  {"text": "Dă-mi ideile principale din raportul Q1", "label": "summarize"},
+  {"text": "Sintetizează istoricul de facturare al SecureIT", "label": "summarize"},
+  {"text": "Give me a brief summary of the WebDev contract", "label": "summarize"},
+  {"text": "Summarize the overall standing of the DataPro account", "label": "summarize"},
+  {"text": "Recap the main figures from the Q4 report", "label": "summarize"},
+  {"text": "Provide an overview of all TechSoft invoices", "label": "summarize"}
+]
