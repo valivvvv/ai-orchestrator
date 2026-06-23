@@ -15,6 +15,11 @@ sentence-transformers
 # LLM (unul din acestea)
 openai
 google-genai
+anthropic
+
+# Intent classifier (L7)
+scikit-learn
+joblib
 
 # Utils
 python-dotenv

@@ -41,9 +41,18 @@ class OrchestratorFeedback(BaseModel):
     suggestion: str = ""
 
 
+class ConversationMessage(BaseModel):
+    """A conversation history message (attribute access for the Jinja loop)."""
+    role: str
+    content: str
+
+
 class OrchestratorState(BaseModel):
     """State pentru Orchestrator."""
-    query: str                                      # întrebarea originală
+    query: str                                      # current query (may be rewritten for retrieval)
+    session_id: str = ""                            # conversation key; empty = memory off
+    history: list[ConversationMessage] = Field(default_factory=list)
+    original_query: str = ""                        # literal user input (for persistence)
     rag_result: RAGSearchResult | None = None       # chunks de la RAG Agent
     feedback: OrchestratorFeedback | None = None    # evaluarea orchestratorului
     iteration: int = 0

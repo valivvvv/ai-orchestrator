@@ -23,6 +23,7 @@ from skillab.prompts import PromptRegistry
 
 from state import OrchestratorState, OrchestratorFeedback
 from rag_agent import RAGAgent, RAGAgentConfig
+from memory import PersistentMemory
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,40 @@ class Orchestrator:
         rag_config.default_threshold = self.config.min_score
         self.rag = RAGAgent(self.llm, rag_config)
 
+        self._app = None  # compiled graph, built once on first run()
+
     # === NODES ===
+
+    def node_load_memory(self, state: OrchestratorState) -> dict:
+        """Load prior turns and rewrite a follow-up into a standalone query.
+
+        No-op when session_id is empty. With history, the user's query is
+        contextualized (so retrieval works on follow-ups); original_query
+        preserves the literal input for persistence.
+        """
+        if not state.session_id:
+            return {}
+
+        memory = PersistentMemory()
+        history = memory.load_messages(state.session_id)
+        original_query = state.query
+
+        if not history:
+            return {"history": history, "original_query": original_query}
+
+        prompt = self.prompts.render(
+            "query_contextualize",
+            history=history,
+            query=state.query,
+        )
+        standalone_query = self.llm.generate_sync([{"role": "user", "content": prompt}]).strip()
+        logger.info(f"[LOAD_MEMORY] rewrote query -> {standalone_query!r}")
+
+        return {
+            "history": history,
+            "original_query": original_query,
+            "query": standalone_query,
+        }
 
     def node_call_rag(self, state: OrchestratorState) -> dict:
         """Apelează RAG Agent pentru căutare. COMPLET - nu modifica."""
@@ -158,7 +192,7 @@ class Orchestrator:
             }
 
         context = "\n\n".join(f"[{item.file_name}]\n{item.content}" for item in results)
-        prompt = self.prompts.render("rag_answer", query=state.query, context=context)
+        prompt = self.prompts.render("rag_answer", query=state.query, context=context, history=state.history)
         answer = self.llm.generate_sync([{"role": "user", "content": prompt}])
 
         # success only if the supervisor was satisfied; otherwise we answered
@@ -167,6 +201,19 @@ class Orchestrator:
         status = "success" if can_answer else "partial"
 
         return {"answer": answer, "status": status}
+
+    def node_save_memory(self, state: OrchestratorState) -> dict:
+        """Persist the user turn and assistant answer. No-op on empty session_id.
+
+        Saves original_query (the literal user input), not the rewritten query.
+        """
+        if not state.session_id:
+            return {}
+
+        memory = PersistentMemory()
+        memory.save_message(state.session_id, "user", state.original_query or state.query)
+        memory.save_message(state.session_id, "assistant", state.answer)
+        return {}
 
     # === ROUTING ===
 
@@ -185,17 +232,27 @@ class Orchestrator:
         """Construiește graful Orchestrator."""
         graph = StateGraph(OrchestratorState)
 
+        graph.add_node("load_memory", self.node_load_memory)
         graph.add_node("call_rag", self.node_call_rag)
         graph.add_node("evaluate", self.node_evaluate)
         graph.add_node("answer", self.node_answer)
+        graph.add_node("save_memory", self.node_save_memory)
 
-        graph.add_edge(START, "call_rag")
+        graph.add_edge(START, "load_memory")
+        graph.add_edge("load_memory", "call_rag")
         graph.add_edge("call_rag", "evaluate")
         graph.add_conditional_edges(
             "evaluate",
             self._should_continue,
             {"call_rag": "call_rag", "answer": "answer"}
         )
-        graph.add_edge("answer", END)
+        graph.add_edge("answer", "save_memory")
+        graph.add_edge("save_memory", END)
 
         return graph.compile()
+
+    def run(self, query: str, session_id: str = "") -> dict:
+        """Conversational entry point: load memory, answer, save. Returns the result dict."""
+        if self._app is None:
+            self._app = self.build_graph()
+        return self._app.invoke(OrchestratorState(query=query, session_id=session_id))

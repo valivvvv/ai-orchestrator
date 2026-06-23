@@ -1,0 +1,18 @@
+name: query_contextualize
+version: "1.0.0"
+description: Rescrie un follow-up într-un query de sine stătător folosind istoricul
+
+prompt: |
+  Pe baza conversației anterioare, rescrie ultima întrebare a utilizatorului
+  într-un query de sine stătător, complet, care poate fi înțeles fără context.
+  Înlocuiește pronumele și referințele ("ei", "acolo", "lor") cu entitățile concrete.
+
+  CONVERSAȚIE ANTERIOARĂ:
+  {% for msg in history %}
+  {{ msg.role }}: {{ msg.content }}
+  {% endfor %}
+
+  ÎNTREBARE CURENTĂ: {{ query }}
+
+  Returnează DOAR query-ul rescris, fără explicații, fără ghilimele, fără alte texte.
+  Dacă întrebarea e deja completă, returneaz-o neschimbată.

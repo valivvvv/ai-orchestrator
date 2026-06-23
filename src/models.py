@@ -5,8 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from pgvector.sqlalchemy import Vector
-from sqlalchemy import Column, Integer, String, Text, DateTime, Numeric, Index
-from sqlalchemy.orm import declarative_base
+from sqlalchemy import Column, Integer, String, Text, DateTime, Numeric, Index, ForeignKey, func
+from sqlalchemy.orm import declarative_base, relationship
 
 Base = declarative_base()
 
@@ -58,6 +58,29 @@ class AchizitieDirecta(Base):
     valoare_eur = Column(Numeric(15, 2))
     cpv_code_id = Column(String(50))
     cpv_code = Column(String(200))
+
+
+class Session(Base):
+    """Conversation session for persistent memory."""
+    __tablename__ = "sessions"
+
+    id = Column(String(255), primary_key=True)  # user-provided session key
+    created_at = Column(DateTime, server_default=func.now())
+
+    messages = relationship("ChatMessage", back_populates="session")
+
+
+class ChatMessage(Base):
+    """A single turn (user/assistant) persisted for long-term memory."""
+    __tablename__ = "chat_messages"
+
+    id = Column(Integer, primary_key=True, autoincrement=True)  # ordering tiebreaker
+    session_id = Column(String(255), ForeignKey("sessions.id"), nullable=False, index=True)
+    role = Column(String(20), nullable=False)  # "user" / "assistant"
+    content = Column(Text, nullable=False)
+    created_at = Column(DateTime, server_default=func.now())
+
+    session = relationship("Session", back_populates="messages")
 
 
 class AnuntInitiere(Base):
