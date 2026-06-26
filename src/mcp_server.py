@@ -38,6 +38,7 @@ from mcp.server.stdio import stdio_server
 
 from skillab import get_llm
 from analyst_agent import AnalystAgent
+from orchestrator import Orchestrator
 
 DATA_DIR = REPO_ROOT / "data"
 
@@ -50,11 +51,12 @@ MAX_INPUT_LENGTH = 5000
 server = Server("ai-orchestrator")
 
 _analyst: AnalystAgent | None = None
+_orchestrator: Orchestrator | None = None
 
 
 def build_agents() -> None:
     """Construct the agent singletons once, forcing Anthropic for stdout hygiene."""
-    global _analyst
+    global _analyst, _orchestrator
 
     language_model = get_llm(provider="anthropic", model=os.getenv("ANTHROPIC_MODEL"))
     logger.info(f"Building agents on anthropic / {language_model.model}")
@@ -72,7 +74,10 @@ def build_agents() -> None:
         },
         llm=language_model,
     )
-    logger.info("Agents built: data_analyst ready")
+
+    _orchestrator = Orchestrator(llm=language_model)
+
+    logger.info("Agents built: data_analyst, document_qa ready")
 
 
 @server.list_tools()
@@ -97,6 +102,31 @@ async def list_tools() -> list[types.Tool]:
                 "additionalProperties": False,
             },
         ),
+        types.Tool(
+            name="document_qa",
+            description=(
+                "Answer questions about the company documents (clients, contracts, "
+                "invoices, reports) via retrieval-augmented generation; supports "
+                "multi-turn via session_id."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Natural-language question about the company documents.",
+                        "maxLength": MAX_INPUT_LENGTH,
+                    },
+                    "session_id": {
+                        "type": "string",
+                        "description": "Optional conversation id for multi-turn memory; empty disables memory.",
+                        "default": "",
+                    },
+                },
+                "required": ["query"],
+                "additionalProperties": False,
+            },
+        ),
     ]
 
 
@@ -115,6 +145,8 @@ def _handle_call(name: str, arguments: dict) -> str:
     # TODO(Phase 3): guard_call(name, arguments, _validator) gate goes here, first.
     if name == "data_analyst":
         result = _analyst.chat(arguments["question"])
+    elif name == "document_qa":
+        result = _orchestrator.run(arguments["query"], arguments.get("session_id", ""))
     else:
         raise McpError(types.ErrorData(code=-32601, message=f"Unknown tool: {name}"))
 

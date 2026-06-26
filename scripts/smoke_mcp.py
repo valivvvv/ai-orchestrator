@@ -40,27 +40,42 @@ async def run() -> None:
             print("TOOLS/LIST")
             _line("=")
             tools = (await session.list_tools()).tools
-            assert len(tools) == 1, f"expected 1 tool, got {len(tools)}"
+            assert len(tools) == 2, f"expected 2 tools, got {len(tools)}"
+            tool_names = {tool.name for tool in tools}
+            assert tool_names == {"data_analyst", "document_qa"}, f"unexpected tools: {tool_names}"
             for tool in tools:
                 print(f"name        : {tool.name}")
                 print(f"description : {tool.description}")
                 print(f"required    : {tool.inputSchema.get('required')}")
                 print(f"properties  : {list(tool.inputSchema.get('properties', {}))}")
+                _line("-")
 
             _line("=")
             print("TOOLS/CALL  data_analyst")
             _line("=")
             question = "Cate achizitii directe sunt in total?"
             print(f"request.arguments : {{'question': {question!r}}}")
-            call_result = await session.call_tool("data_analyst", {"question": question})
-            answer = call_result.content[0].text
-            assert answer.strip(), "empty answer"
-            print(f"isError           : {call_result.isError}")
-            print(f"content[0].type   : {call_result.content[0].type}")
-            print(f"answer            :\n{answer}")
+            analyst_result = await session.call_tool("data_analyst", {"question": question})
+            analyst_answer = analyst_result.content[0].text
+            assert analyst_answer.strip(), "empty data_analyst answer"
+            print(f"isError           : {analyst_result.isError}")
+            print(f"content[0].type   : {analyst_result.content[0].type}")
+            print(f"answer            :\n{analyst_answer}")
+
+            _line("=")
+            print("TOOLS/CALL  document_qa")
+            _line("=")
+            query = "Ce contact are DataPro?"
+            print(f"request.arguments : {{'query': {query!r}, 'session_id': ''}}")
+            qa_result = await session.call_tool("document_qa", {"query": query, "session_id": ""})
+            qa_answer = qa_result.content[0].text
+            assert qa_answer.strip(), "empty document_qa answer"
+            print(f"isError           : {qa_result.isError}")
+            print(f"content[0].type   : {qa_result.content[0].type}")
+            print(f"answer            :\n{qa_answer}")
 
     _line("=")
-    print("SMOKE v1 PASSED: 1 tool listed, data_analyst returned a non-empty answer.")
+    print("SMOKE v2 PASSED: 2 tools listed; data_analyst and document_qa both returned non-empty answers.")
     _line("=")
 
 

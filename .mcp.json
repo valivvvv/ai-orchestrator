@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "ai-orchestrator": {
+      "type": "stdio",
+      "command": "${CLAUDE_PROJECT_DIR:-.}/.venv/bin/python",
+      "args": ["${CLAUDE_PROJECT_DIR:-.}/src/mcp_server.py"]
+    }
+  }
+}

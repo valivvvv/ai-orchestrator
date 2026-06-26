@@ -257,7 +257,7 @@ async with stdio_client(params) as (read, write):
 
 > **Overview.** *Problem:* only one agent is exposed; the homework wants both in the same server, callable from Claude Code. *What:* add a `document_qa` tool (Orchestrator/RAG) to the **same** server and register the server in `.mcp.json`. *Why:* one server, two tools, provider-agnostic client — the core MCP value (N+M, not N×M). *Proven by:* the client lists **two** tools and both answer; Claude Code's `/mcp` shows the server and runs both tools.
 
-### Phase 2 — Orchestrator tool + Claude Code integration (Task 2: L10)
+### Phase 2 — Orchestrator tool + Claude Code integration (Task 2: L10) ✅ DONE
 1. **`_orchestrator` singleton** — build `Orchestrator(llm=get_llm("anthropic", ...))` alongside `_analyst` at startup.
 2. **`@server.list_tools()`** — add the second `types.Tool`: `document_qa` with its `inputSchema` (`query` required, `session_id` optional — §6).
 3. **`@server.call_tool()`** — add the `document_qa` branch: `_orchestrator.run(arguments["query"], arguments.get("session_id", ""))`, return its `answer` as `TextContent`. **Default `session_id=""` → `node_load_memory` no-ops** (no DB hit); a **non-empty** `session_id` exercises the L8 memory path and therefore requires L8's `sessions`/`chat_messages` tables (migration `004`) to be applied — note this in the smoke if you pass one.
