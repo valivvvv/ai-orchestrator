@@ -29,3 +29,6 @@ langgraph
 
 # SQL parsing (NL2SQL validation)
 sqlparse>=0.5
+
+# MCP server + client (L10)
+mcp
