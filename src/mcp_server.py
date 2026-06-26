@@ -39,24 +39,24 @@ from mcp.server.stdio import stdio_server
 from skillab import get_llm
 from analyst_agent import AnalystAgent
 from orchestrator import Orchestrator
+from guardrails import MAX_INPUT_LENGTH, InputValidator, guard_call
 
 DATA_DIR = REPO_ROOT / "data"
 
-# Declared in the tool's inputSchema so a well-behaved client (e.g. Claude Code)
-# shapes its calls; the actual enforcement lives in guardrails.validate_input
-# (wired in Phase 3). Phase 3 replaces this local copy with an import from
-# guardrails, which owns the canonical value.
-MAX_INPUT_LENGTH = 5000
+# MAX_INPUT_LENGTH is declared in each tool's inputSchema so a well-behaved
+# client (e.g. Claude Code) shapes its calls; the actual enforcement lives in
+# guardrails, which owns the canonical value imported above.
 
 server = Server("ai-orchestrator")
 
 _analyst: AnalystAgent | None = None
 _orchestrator: Orchestrator | None = None
+_validator: InputValidator | None = None
 
 
 def build_agents() -> None:
     """Construct the agent singletons once, forcing Anthropic for stdout hygiene."""
-    global _analyst, _orchestrator
+    global _analyst, _orchestrator, _validator
 
     language_model = get_llm(provider="anthropic", model=os.getenv("ANTHROPIC_MODEL"))
     logger.info(f"Building agents on anthropic / {language_model.model}")
@@ -76,6 +76,8 @@ def build_agents() -> None:
     )
 
     _orchestrator = Orchestrator(llm=language_model)
+
+    _validator = InputValidator(use_llm=False)
 
     logger.info("Agents built: data_analyst, document_qa ready")
 
@@ -142,7 +144,17 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
 
 
 def _handle_call(name: str, arguments: dict) -> str:
-    # TODO(Phase 3): guard_call(name, arguments, _validator) gate goes here, first.
+    verdict = guard_call(name, arguments, _validator)
+    if not verdict.passed:
+        logger.warning(f"Guardrail blocked {name} call (method={verdict.method})")
+        raise McpError(
+            types.ErrorData(
+                code=-32000,
+                message=f"Blocked by guardrail ({verdict.method})",
+                data=verdict.details,
+            )
+        )
+
     if name == "data_analyst":
         result = _analyst.chat(arguments["question"])
     elif name == "document_qa":

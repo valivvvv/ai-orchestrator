@@ -162,6 +162,55 @@ python scripts/train_intent.py
 
 > **Notă quota Gemini:** free tier ≈ 20 cereri/zi/model. `python src/main.py` plus bucla evaluate/refine a orchestratorului o consumă rapid; cele trei demo-uri L8 rulează pe Claude (Anthropic), deci quota Gemini contează doar pentru `main.py`.
 
+## Temă L10 — MCP & Guardrails — cum se testează
+
+Cei doi agenți sunt expuși ca tool-uri într-un singur server MCP (`src/mcp_server.py`, transport STDIO), iar intrarea în server este protejată de guardrails (`src/guardrails.py`).
+
+- **Task 1** — `AnalystAgent` expus ca tool MCP `data_analyst` (`AnalystAgent.chat(question)`).
+- **Task 2** — `Orchestrator` expus ca al doilea tool MCP `document_qa` în **același** server (`Orchestrator.run(query, session_id)`), plus integrare în **Claude Code** prin `.mcp.json`.
+- **Task 3** — guardrail de intrare: validare structurală (tip, dimensiune, câmpuri permise) + detecție prompt-injection (regex, opțional LLM-as-Judge) care **blochează** inputul periculos **înainte** să ajungă la agent.
+
+### Setup (o singură dată)
+
+```bash
+docker compose up -d            # Postgres pgvector pe portul host 5434
+alembic upgrade head
+docker exec -i ai-orchestrator-postgres-1 pg_restore -U demo -d rag_demo --data-only < data/rag_demo.dump
+
+pip install -r requirements.txt   # include mcp (SDK-ul oficial MCP)
+pip install -e skillab-py
+
+# .env (chei necesare):
+#   ANTHROPIC_API_KEY=...
+#   ANTHROPIC_MODEL=claude-haiku-4-5
+#   DATABASE_URL=postgresql://demo:demo123@localhost:5434/rag_demo
+```
+
+### Client Python (smoke test)
+
+```bash
+python scripts/smoke_mcp.py
+```
+
+Parcurge tot ciclul JSON-RPC: `initialize` → `tools/list` (2 tool-uri) → `tools/call`. Demonstrează:
+- apelurile curate răspund (`isError=False`);
+- promptul de injection (`document_qa`) e blocat de guardrail → `isError=True`, text `Blocked by guardrail (regex)`;
+- inputul cu tip greșit (`{"question": 123}`) și cu câmp necunoscut (`{"question":"x","evil":"y"}`) sunt blocate de validarea `inputSchema` a SDK-ului → `isError=True`, text `Input validation error: …`.
+
+> **Două straturi de apărare.** SDK-ul `mcp` validează `inputSchema` (tip, dimensiune, câmpuri) **înainte** de handler, deci prinde atacurile structurale; `src/guardrails.py` prinde ce trece de schemă (prompt-injection, semantic). În ambele cazuri agentul **nu rulează** pentru un input blocat. Blocările apar ca `CallToolResult` cu `isError=True` (eroare de execuție tool), nu ca un cod JSON-RPC `-32xxx` — în versiunea instalată a SDK-ului orice excepție din handler e împachetată în `isError`.
+
+### Claude Code
+
+`.mcp.json` din rădăcina repo-ului înregistrează serverul STDIO. În Claude Code:
+
+```
+/mcp            # listează „ai-orchestrator · connected · 2 tools"
+```
+
+Apoi invocă fiecare tool (`data_analyst`, `document_qa`) și confirmă că răspund.
+
+> **Igienă stdout.** Pe STDIO, stdout transportă **doar** JSON-RPC, iar logurile merg pe stderr. Serverul rulează agenții forțat pe **Anthropic**, fiindcă providerul Google scrie accidental pe stdout (`print`) și ar corupe stream-ul protocolului.
+
 ## Structură
 
 ```
